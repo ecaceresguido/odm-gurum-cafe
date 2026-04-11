@@ -1,149 +1,100 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
 import plotly.express as px
 import io
 
 # --- CONFIGURACIÓN ---
-URL_SHEET = "https://docs.google.com/spreadsheets/d/1_nN-L9C44kkI-v-KmPwfdwjCg78N5m4juvIGW1XFB9c/edit?gid=0#gid=0"
+# Convertimos el link de edición en un link de descarga directa de CSV
+SHEET_ID = "1_nN-L9C44kkI-v-KmPwfdwjCg78N5m4juvIGW1XFB9c"
+URL_CSV = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+URL_EDIT = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
+
 LISTA_RESPONSABLES = ["Seleccionar...", "Ezequiel Caceres", "Micaela Cardozo", "Federico Kong", "Aldana Molina"]
 
 st.set_page_config(page_title="Gestión ODM - Gurum Café", layout="wide", page_icon="☕")
 
-# --- CONEXIÓN BLINDADA ---
-conn = st.connection("gsheets", type=GSheetsConnection)
-
+# --- CARGA DE DATOS (MÉTODO ROBUSTO) ---
+@st.cache_data(ttl=5)
 def cargar_datos():
-    # ttl=0 para que siempre lea lo último del Sheets sin usar memoria vieja
-    return conn.read(spreadsheet=URL_SHEET, ttl=0)
+    try:
+        df = pd.read_csv(URL_CSV)
+        # Aseguramos que las columnas existan
+        columnas_necesarias = ["ID", "Título", "Fecha", "Descripción", "Responsable", "Prioridad", "Fecha Est. Solución", "Estado", "Comentarios"]
+        for col in columnas_necesarias:
+            if col not in df.columns:
+                df[col] = ""
+        return df
+    except:
+        return pd.DataFrame()
 
 df_raw = cargar_datos()
 
 # --- ENCABEZADO ---
 col_logo, col_titulo = st.columns([1, 5])
 with col_logo:
-    try:
-        st.image("gurumcafe.jpg", width=140)
-    except:
-        st.subheader("☕ Gurum Café")
+    try: st.image("gurumcafe.jpg", width=140)
+    except: st.subheader("☕ Gurum Café")
 with col_titulo:
     st.title("Oportunidades de Mejora (ODM)")
 
 st.divider()
 
-# --- DASHBOARD (GRÁFICO DESPLEGABLE) ---
-with st.expander("📊 Ver Estadísticas (Distribución de Estados)"):
-    if not df_raw.empty and 'Estado' in df_raw.columns:
+if df_raw.empty:
+    st.error("⚠️ No se pudo cargar la base de datos. Verificá que el Sheets esté compartido como 'Editor' para cualquier persona con el enlace.")
+    st.link_button("Revisar Google Sheets", URL_EDIT)
+else:
+    # --- DASHBOARD ---
+    with st.expander("📊 Ver Estadísticas"):
         fig = px.pie(df_raw, names='Estado', title='Estado de las ODM',
                      color='Estado', color_discrete_map={'Abierta':'#ef553b', 'En Curso':'#636efa', 'Cerrada':'#00cc96'})
         st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.write("Carga datos para visualizar el gráfico.")
 
-# --- TABS PRINCIPALES ---
-tab_gestion, tab_nuevo = st.tabs(["📋 Gestión y Edición", "➕ Nueva ODM"])
+    tab_gestion, tab_nuevo = st.tabs(["📋 Gestión y Edición", "➕ Nueva ODM"])
 
-# --- TAB 1: GESTIÓN Y EDICIÓN ---
-with tab_gestion:
-    if not df_raw.empty:
+    with tab_gestion:
         # Filtros
-        col_f1, col_f2, col_f3, col_f4 = st.columns([2, 2, 1, 1])
-        with col_f1:
-            f_resp = st.selectbox("Filtrar Responsable", ["Todos"] + LISTA_RESPONSABLES[1:])
-        with col_f2:
-            f_prio = st.selectbox("Filtrar Prioridad", ["Todas", "Baja", "Media", "Alta"])
-        with col_f3:
-            st.write(" ")
-            if st.button("♻️ Limpiar Filtros", use_container_width=True):
-                st.rerun()
-        with col_f4:
-            st.write(" ")
-            # Descarga a Excel
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_raw.to_excel(writer, index=False, sheet_name='ODMs')
-            st.download_button(label="📥 Descargar Excel", data=output.getvalue(), file_name="ODMs_Gurum_Cafe.xlsx", use_container_width=True)
+        c1, c2, c3 = st.columns([2, 2, 1])
+        with c1: f_resp = st.selectbox("Responsable", ["Todos"] + LISTA_RESPONSABLES[1:])
+        with c2: f_prio = st.selectbox("Prioridad", ["Todas", "Baja", "Media", "Alta"])
+        with c3: 
+            st.write("")
+            if st.button("♻️ Refrescar"): st.rerun()
 
-        # Aplicar Filtros
         dff = df_raw.copy()
         if f_resp != "Todos": dff = dff[dff["Responsable"] == f_resp]
         if f_prio != "Todas": dff = dff[dff["Prioridad"] == f_prio]
 
-        st.subheader("📋 Listado de ODMs")
-        st.info("💡 Haz clic en una fila para editarla.")
-        event = st.dataframe(dff, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row")
+        st.dataframe(dff, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        st.subheader("🛠️ Acciones")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.info("Para **Editar** o **Borrar** una ODM:")
+            st.link_button("📝 Abrir Editor de Google Sheets", URL_EDIT)
+        with col2:
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                df_raw.to_excel(writer, index=False)
+            st.download_button("📥 Descargar todo a Excel", output.getvalue(), "ODMs_Gurum.xlsx")
 
-        # Edición al seleccionar fila
-        if len(event.selection.rows) > 0:
-            idx = event.selection.rows[0]
-            datos = dff.iloc[idx]
-            id_real = datos['ID']
-
-            st.markdown(f"### 🛠️ Editando ODM #{id_real}")
-            
-            # Bloqueo si está Cerrada
-            if str(datos["Estado"]).strip() == "Cerrada":
-                st.warning("⚠️ Esta ODM está **Cerrada**. No se pueden realizar más cambios.")
-            else:
-                with st.form("form_edit"):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        ne_tit = st.text_input("Título", value=datos["Título"])
-                        ne_est = st.selectbox("Estado", ["Abierta", "En Curso", "Cerrada"], 
-                                             index=["Abierta", "En Curso", "Cerrada"].index(datos["Estado"]))
-                    with c2:
-                        ne_com = st.text_area("Comentarios / Avances", value=datos["Comentarios"])
-                    
-                    if st.form_submit_button("💾 Guardar Cambios"):
-                        df_raw.loc[df_raw["ID"] == id_real, ["Título", "Estado", "Comentarios"]] = [ne_tit, ne_est, ne_com]
-                        conn.update(spreadsheet=URL_SHEET, data=df_raw)
-                        st.success("¡Cambios guardados exitosamente!")
-                        st.rerun()
-
-        st.divider()
-        # --- SECCIÓN DE BORRADO ---
-        with st.expander("🗑️ Zona de Peligro: Borrar ODM"):
-            id_borrar = st.number_input("ID de la ODM a eliminar", min_value=1, step=1)
-            if st.button("🗑️ Eliminar ODM"):
-                if id_borrar in df_raw["ID"].values:
-                    # Filtramos el dataframe quitando ese ID
-                    df_final = df_raw[df_raw["ID"] != id_borrar]
-                    conn.update(spreadsheet=URL_SHEET, data=df_final)
-                    st.success(f"ODM #{id_borrar} eliminada.")
-                    st.rerun()
-                else:
-                    st.error("El ID no existe.")
-    else:
-        st.warning("No hay datos cargados en Google Sheets.")
-
-# --- TAB 2: NUEVA ODM ---
-with tab_nuevo:
-    st.subheader("📝 Cargar Nueva Oportunidad de Mejora")
-    with st.form("form_nueva", clear_on_submit=True):
-        col_n1, col_n2 = st.columns(2)
-        with col_n1:
+    with tab_nuevo:
+        with st.form("nueva_odm"):
+            st.subheader("📝 Cargar Nueva ODM")
             t = st.text_input("Título *")
             r = st.selectbox("Responsable *", LISTA_RESPONSABLES)
-            desc = st.text_area("Descripción detallada")
-        with col_n2:
             p = st.select_slider("Prioridad *", ["Baja", "Media", "Alta"])
-            f_est = st.date_input("Fecha Est. Solución", datetime.now())
-            com = st.text_area("Comentarios Iniciales")
-        
-        if st.form_submit_button("🚀 Crear y Guardar"):
-            # VALIDACIÓN ESTRICTA
-            if t == "" or r == "Seleccionar...":
-                st.error("Faltan campos obligatorios (Título o Responsable).")
-            else:
-                prox_id = int(df_raw["ID"].max() + 1) if not df_raw.empty else 1
-                nueva = pd.DataFrame([{
-                    "ID": prox_id, "Título": t, "Fecha": datetime.now().strftime("%d/%m/%Y"),
-                    "Descripción": desc, "Responsable": r, "Prioridad": p, 
-                    "Fecha Est. Solución": f_est.strftime("%d/%m/%Y"), "Estado": "Abierta", "Comentarios": com
-                }])
-                df_final = pd.concat([df_raw, nueva], ignore_index=True)
-                conn.update(spreadsheet=URL_SHEET, data=df_final)
-                st.success(f"¡ODM #{prox_id} creada!")
-                st.balloons()
-                st.rerun()
+            desc = st.text_area("Descripción")
+            
+            if st.form_submit_button("🚀 Generar para Sheets"):
+                if t and r != "Seleccionar...":
+                    prox_id = int(df_raw["ID"].max() + 1) if not df_raw.empty else 1
+                    fecha = datetime.now().strftime("%d/%m/%Y")
+                    # Esta es la fila que el usuario copiará
+                    fila = f"{prox_id}\t{t}\t{fecha}\t{desc}\t{r}\t{p}\t\tAbierta\t"
+                    st.success("✅ ¡ODM Generada! Copiá la fila de abajo y pegala al final de tu Google Sheets:")
+                    st.code(fila)
+                    st.link_button("Ir al Sheets a pegar", URL_EDIT)
+                else:
+                    st.error("Título y Responsable son obligatorios.")
