@@ -2,10 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import plotly.express as px
-import io
 
 # --- CONFIGURACIÓN ---
-# Convertimos el link de edición en un link de descarga directa de CSV
 SHEET_ID = "1_nN-L9C44kkI-v-KmPwfdwjCg78N5m4juvIGW1XFB9c"
 URL_CSV = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 URL_EDIT = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
@@ -14,16 +12,11 @@ LISTA_RESPONSABLES = ["Seleccionar...", "Ezequiel Caceres", "Micaela Cardozo", "
 
 st.set_page_config(page_title="Gestión ODM - Gurum Café", layout="wide", page_icon="☕")
 
-# --- CARGA DE DATOS (MÉTODO ROBUSTO) ---
+# --- CARGA DE DATOS ---
 @st.cache_data(ttl=5)
 def cargar_datos():
     try:
         df = pd.read_csv(URL_CSV)
-        # Aseguramos que las columnas existan
-        columnas_necesarias = ["ID", "Título", "Fecha", "Descripción", "Responsable", "Prioridad", "Fecha Est. Solución", "Estado", "Comentarios"]
-        for col in columnas_necesarias:
-            if col not in df.columns:
-                df[col] = ""
         return df
     except:
         return pd.DataFrame()
@@ -34,21 +27,21 @@ df_raw = cargar_datos()
 col_logo, col_titulo = st.columns([1, 5])
 with col_logo:
     try: st.image("gurumcafe.jpg", width=140)
-    except: st.subheader("☕ Gurum Café")
+    except: st.subheader("☕")
 with col_titulo:
     st.title("Oportunidades de Mejora (ODM)")
 
 st.divider()
 
 if df_raw.empty:
-    st.error("⚠️ No se pudo cargar la base de datos. Verificá que el Sheets esté compartido como 'Editor' para cualquier persona con el enlace.")
-    st.link_button("Revisar Google Sheets", URL_EDIT)
+    st.error("⚠️ No se pudieron cargar los datos. Verifica el Sheets.")
 else:
-    # --- DASHBOARD ---
+    # Gráficos
     with st.expander("📊 Ver Estadísticas"):
-        fig = px.pie(df_raw, names='Estado', title='Estado de las ODM',
-                     color='Estado', color_discrete_map={'Abierta':'#ef553b', 'En Curso':'#636efa', 'Cerrada':'#00cc96'})
-        st.plotly_chart(fig, use_container_width=True)
+        if 'Estado' in df_raw.columns:
+            fig = px.pie(df_raw, names='Estado', title='Estado de las ODM',
+                         color='Estado', color_discrete_map={'Abierta':'#ef553b', 'En Curso':'#636efa', 'Cerrada':'#00cc96'})
+            st.plotly_chart(fig, use_container_width=True)
 
     tab_gestion, tab_nuevo = st.tabs(["📋 Gestión y Edición", "➕ Nueva ODM"])
 
@@ -69,32 +62,25 @@ else:
         
         st.markdown("---")
         st.subheader("🛠️ Acciones")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.info("Para **Editar** o **Borrar** una ODM:")
-            st.link_button("📝 Abrir Editor de Google Sheets", URL_EDIT)
-        with col2:
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                df_raw.to_excel(writer, index=False)
-            st.download_button("📥 Descargar todo a Excel", output.getvalue(), "ODMs_Gurum.xlsx")
+        st.info("Para **Editar** o **Borrar** una fila, usa el botón de abajo para abrir el Excel directamente:")
+        st.link_button("📝 Abrir Editor de Google Sheets", URL_EDIT)
 
     with tab_nuevo:
         with st.form("nueva_odm"):
-            st.subheader("📝 Cargar Nueva ODM")
+            st.subheader("📝 Generar Nueva ODM")
             t = st.text_input("Título *")
             r = st.selectbox("Responsable *", LISTA_RESPONSABLES)
             p = st.select_slider("Prioridad *", ["Baja", "Media", "Alta"])
             desc = st.text_area("Descripción")
             
-            if st.form_submit_button("🚀 Generar para Sheets"):
+            if st.form_submit_button("🚀 Crear Fila"):
                 if t and r != "Seleccionar...":
                     prox_id = int(df_raw["ID"].max() + 1) if not df_raw.empty else 1
                     fecha = datetime.now().strftime("%d/%m/%Y")
-                    # Esta es la fila que el usuario copiará
-                    fila = f"{prox_id}\t{t}\t{fecha}\t{desc}\t{r}\t{p}\t\tAbierta\t"
-                    st.success("✅ ¡ODM Generada! Copiá la fila de abajo y pegala al final de tu Google Sheets:")
+                    # Formato para copiar y pegar fácil
+                    fila = f"{prox_id}, {t}, {fecha}, {desc}, {r}, {p}, , Abierta, "
+                    st.success("✅ ¡Fila generada! Copiala y pegala al final del Google Sheets:")
                     st.code(fila)
-                    st.link_button("Ir al Sheets a pegar", URL_EDIT)
+                    st.link_button("Ir al Sheets", URL_EDIT)
                 else:
                     st.error("Título y Responsable son obligatorios.")
